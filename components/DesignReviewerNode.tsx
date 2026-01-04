@@ -1,6 +1,6 @@
-import React, { memo, useState, useEffect, useCallback, useRef } from 'react';
+import React, { memo, useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { Handle, Position, NodeProps, NodeResizer, useEdges, useUpdateNodeInternals, useReactFlow } from 'reactflow';
-import { PSDNodeData, TransformedPayload, ReviewerInstanceState, ReviewerStrategy, TransformedLayer, LayerOverride, ChatMessage } from '../types';
+import { PSDNodeData, TransformedPayload, ReviewerInstanceState, ReviewerStrategy, TransformedLayer, LayerOverride, ChatMessage, KnowledgeContext } from '../types';
 import { useProceduralStore } from '../store/ProceduralContext';
 import { findLayerByPath } from '../services/psdService';
 import { GoogleGenAI, Type } from "@google/genai";
@@ -213,8 +213,7 @@ const ReviewerInstanceRow: React.FC<{
         const previousGenId = lastProcessedGenerationId.current;
 
         // GEOMETRIC RESET DETECTION:
-        // If the payload is geometric (no generation required, not confirmed), we should clear old AI audits.
-        // We check if it lacks generation flags OR if generationId has changed.
+        // If the payload is geometric (no generation required, not confirmed), this is a base-level reset.
         const isGeometricReset = !incomingPayload.requiresGeneration && !incomingPayload.isConfirmed && !incomingPayload.previewUrl;
         
         // Initialize Ref if undefined
@@ -406,10 +405,17 @@ export const DesignReviewerNode = memo(({ id, data }: NodeProps<PSDNodeData>) =>
   
   const { setNodes } = useReactFlow();
   const updateNodeInternals = useUpdateNodeInternals();
-  const { payloadRegistry, psdRegistry, unregisterNode } = useProceduralStore();
+  const { payloadRegistry, psdRegistry, unregisterNode, knowledgeRegistry } = useProceduralStore();
   const rootRef = useRef<HTMLDivElement>(null);
   
   const edges = useEdges();
+
+  // Knowledge Context Resolution (Global Brain Connection)
+  const activeKnowledge = useMemo(() => {
+    const edge = edges.find(e => e.target === id && e.targetHandle === 'knowledge-in');
+    if (!edge) return null;
+    return knowledgeRegistry[edge.source];
+  }, [edges, id, knowledgeRegistry]);
 
   // ResizeObserver to handle dynamic content height changes (like chat expanding)
   useEffect(() => {
@@ -457,7 +463,7 @@ export const DesignReviewerNode = memo(({ id, data }: NodeProps<PSDNodeData>) =>
     return nodePayloads ? nodePayloads[edge.sourceHandle || ''] : null;
   }, [id, payloadRegistry, edges]);
 
-  const processAudit = async (index: number, userInstruction?: string) => {
+  const processAudit = async (index: number, userInstruction?: string, knowledgeContext?: KnowledgeContext | null) => {
       const payload = getIncomingPayload(index);
       if (!payload) return;
 
@@ -638,8 +644,8 @@ export const DesignReviewerNode = memo(({ id, data }: NodeProps<PSDNodeData>) =>
       }
   };
 
-  const handleReview = (index: number) => processAudit(index);
-  const handleRefine = (index: number, prompt: string) => processAudit(index, prompt);
+  const handleReview = (index: number) => processAudit(index, undefined, activeKnowledge);
+  const handleRefine = (index: number, prompt: string) => processAudit(index, prompt, activeKnowledge);
 
   const addInstance = () => {
       setNodes(nds => nds.map(n => n.id === id ? { ...n, data: { ...n.data, instanceCount: instanceCount + 1 } } : n));
@@ -656,6 +662,8 @@ export const DesignReviewerNode = memo(({ id, data }: NodeProps<PSDNodeData>) =>
         lineStyle={{ border: 'none' }}
       />
       
+      <Handle type="target" position={Position.Top} id="knowledge-in" className={`!w-4 !h-4 !-top-2 !bg-emerald-500 !border-2 !border-slate-900 z-50 transition-all duration-300 ${activeKnowledge ? 'shadow-[0_0_10px_#10b981]' : ''}`} style={{ left: '50%', transform: 'translateX(-50%)' }} title="Input: Global Design Rules (CARO)" />
+
       {/* Header */}
       <div className="relative bg-emerald-950/80 backdrop-blur-md p-2 border-b border-emerald-500/30 flex items-center justify-between shrink-0 overflow-hidden rounded-t-lg">
          <div className="absolute inset-0 bg-[url('https://grainy-gradients.vercel.app/noise.svg')] opacity-20 mix-blend-soft-light pointer-events-none"></div>
@@ -665,9 +673,16 @@ export const DesignReviewerNode = memo(({ id, data }: NodeProps<PSDNodeData>) =>
              <span className="text-sm font-bold text-emerald-100 tracking-tight">Design Reviewer</span>
              <span className="text-[9px] text-emerald-500/70 font-mono font-bold tracking-widest">PERSONA: CARO</span>
            </div>
+           
+           {activeKnowledge && (
+             <span className="flex h-2 w-2 relative ml-2">
+                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
+             </span>
+           )}
          </div>
-         <div className="z-10 px-1.5 py-0.5 rounded border border-emerald-500/50 bg-emerald-500/10 text-[8px] text-emerald-400 font-bold uppercase tracking-widest backdrop-blur-sm">
-            Audit Gate
+         <div className={`z-10 px-1.5 py-0.5 rounded border text-[8px] font-bold uppercase tracking-widest backdrop-blur-sm ${activeKnowledge ? 'bg-emerald-500/20 border-emerald-500/50 text-emerald-300' : 'bg-emerald-500/10 border-emerald-500/50 text-emerald-400'}`}>
+            {activeKnowledge ? "KNOWLEDGE ACTIVE" : "Audit Gate"}
          </div>
       </div>
 
