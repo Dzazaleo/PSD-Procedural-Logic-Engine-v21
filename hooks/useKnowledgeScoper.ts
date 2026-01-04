@@ -9,14 +9,10 @@ const GLOBAL_KEY = 'GLOBAL CONTEXT';
 
 /**
  * Parses raw text rules into a structured map of Container -> Rules.
- * Mimics the "Knowledge Scoping Protocol" used by the DesignAnalystNode to 
- * partition global guidelines into container-specific directives.
  * 
- * UPGRADE v2: Enhanced Regex to support:
- * 1. Bracketed names: [Bonus 1], [Header]
- * 2. Markdown headers: ### Header
- * 3. Colon suffixes: Header Name:
- * 4. Bold headers: **Header**
+ * UPGRADE v3: Look-Ahead Heuristics
+ * Detects implicit headers (e.g., "Bonus 1") by checking if they are immediately
+ * followed by a list item (e.g., "1. Rule...").
  */
 export const useKnowledgeScoper = (rawRules: string | undefined): ScopedKnowledge => {
   return useMemo(() => {
@@ -27,71 +23,77 @@ export const useKnowledgeScoper = (rawRules: string | undefined): ScopedKnowledg
       };
     }
 
-    // Initialize with Global Context to ensure it's always first
+    // Initialize with Global Context
     const scopes: Record<string, string[]> = { [GLOBAL_KEY]: [] };
     let currentScope = GLOBAL_KEY;
 
-    // Splits by newline to process line-by-line
+    // Split and cleanup whitespace but preserve indices for context
     const lines = rawRules.split('\n');
 
-    lines.forEach(line => {
-      const trimmed = line.trim();
-      if (!trimmed) return;
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i].trim();
+      if (!line) continue;
 
-      // --- REGEX STRATEGY ---
-      
-      // 1. Bracketed Headers: [Container Name]
-      // Capture content inside brackets, ignore trailing colons
-      const bracketMatch = trimmed.match(/^\[([^\]]+)\]:?$/);
-
-      // 2. Markdown Headers: ### Container Name
-      const mdMatch = trimmed.match(/^#+\s+(.+)$/);
-
-      // 3. Colon Headers: Container Name: 
-      // Strict length check (< 50) to avoid capturing long sentences ending in colon.
-      // allow letters, numbers, spaces, underscores, dashes/slashes
-      const colonMatch = trimmed.match(/^([A-Za-z0-9 _/-]+):$/);
-
-      // 4. Bold Headers: **Container Name**
-      const boldMatch = trimmed.match(/^\*\*([^*]+)\*\*:?$/);
+      // --- HEURISTIC 1: Explicit Syntax Headers ---
+      const bracketMatch = line.match(/^\[([^\]]+)\]:?$/);         // [Header]
+      const mdMatch = line.match(/^#+\s+(.+)$/);                   // ### Header
+      const boldMatch = line.match(/^\*\*([^*]+)\*\*:?$/);         // **Header**
+      const colonMatch = line.match(/^([A-Za-z0-9 _/-]+):$/);      // Header:
 
       let detectedHeader: string | null = null;
 
-      if (bracketMatch) {
-          detectedHeader = bracketMatch[1];
-      } else if (mdMatch) {
-          detectedHeader = mdMatch[1];
-      } else if (boldMatch) {
-          detectedHeader = boldMatch[1];
-      } else if (colonMatch && trimmed.length < 50) {
-          detectedHeader = colonMatch[1];
+      if (bracketMatch) detectedHeader = bracketMatch[1];
+      else if (mdMatch) detectedHeader = mdMatch[1];
+      else if (boldMatch) detectedHeader = boldMatch[1];
+      else if (colonMatch && line.length < 50) detectedHeader = colonMatch[1];
+
+      // --- HEURISTIC 2: Implicit "Title Case" Headers with Look-Ahead ---
+      // If no explicit syntax, check if this line LOOKS like a header and the NEXT line IS a list item.
+      if (!detectedHeader) {
+          // Check next non-empty line
+          let nextIndex = i + 1;
+          while (nextIndex < lines.length && !lines[nextIndex].trim()) {
+              nextIndex++;
+          }
+          const nextLine = nextIndex < lines.length ? lines[nextIndex].trim() : '';
+
+          // Is the NEXT line a list item? (starts with "1.", "-", "*", "•")
+          const isNextList = /^(?:\d+\.|[-*•])\s/.test(nextLine);
+          
+          // Is THIS line NOT a list item?
+          const isCurrentList = /^(?:\d+\.|[-*•])\s/.test(line);
+
+          // Is this line short enough to be a header?
+          const isShort = line.length < 60;
+
+          // Does it NOT end in punctuation (like a sentence)?
+          const isSentence = /[.!?]$/.test(line);
+
+          if (isNextList && !isCurrentList && isShort && !isSentence) {
+              detectedHeader = line;
+          }
       }
 
-      // --- SCOPING LOGIC ---
-
+      // --- APPLY SCOPING ---
       if (detectedHeader) {
-          // Normalize to Uppercase for consistent key matching
           const normalizedScope = detectedHeader.trim().toUpperCase();
-
-          // Filter out system tags that might look like headers
+          
+          // Ignore system tags
           if (normalizedScope !== 'START KNOWLEDGE' && normalizedScope !== 'END KNOWLEDGE') {
               currentScope = normalizedScope;
-              
-              // Initialize bucket if it doesn't exist
               if (!scopes[currentScope]) {
                   scopes[currentScope] = [];
               }
           }
       } else {
-          // It's a rule/content line, add to current scope
-          scopes[currentScope].push(trimmed);
+          // It is content. Add to current scope.
+          // We preserve the original line text (including numbering) for strict citation.
+          scopes[currentScope].push(line);
       }
-    });
+    }
 
     return {
       scopes,
-      // Object.keys preserves insertion order for string keys (mostly), 
-      // keeping GLOBAL_KEY first as initialized.
       availableScopes: Object.keys(scopes)
     };
   }, [rawRules]);

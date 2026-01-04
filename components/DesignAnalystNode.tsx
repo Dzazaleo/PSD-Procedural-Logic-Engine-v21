@@ -681,6 +681,8 @@ export const DesignAnalystNode = memo(({ id, data }: NodeProps<PSDNodeData>) => 
         ${effectiveRules}
         [END KNOWLEDGE]
         
+        CRITICAL: You are restricted to the following [CONTAINER PROTOCOL]. Ignore all previous generic design training that contradicts these specific rules.
+        
         ` + prompt;
     }
     
@@ -700,6 +702,9 @@ export const DesignAnalystNode = memo(({ id, data }: NodeProps<PSDNodeData>) => 
       const targetName = targetData.name.toUpperCase();
       const globalRules = scopes['GLOBAL CONTEXT'] || [];
       const specificRules = scopes[targetName] || [];
+      
+      // Construct the Effective Ruleset
+      // IMPORTANT: We preserve the original numbering from the Knowledge Scoper.
       const effectiveRules = (!isMuted && activeKnowledge) 
           ? [...globalRules, ...specificRules].join('\n')
           : null;
