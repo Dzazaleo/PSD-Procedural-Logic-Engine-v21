@@ -507,7 +507,6 @@ export const DesignReviewerNode = memo(({ id, data }: NodeProps<PSDNodeData>) =>
 
       try {
           // 1. Determine Effective State for Vision
-          // If we have existing overrides, we must render the *modified* state so the AI sees the current result.
           const currentState = reviewerInstances[index];
           const currentOverrides = currentState?.reviewerStrategy?.overrides || [];
           
@@ -531,7 +530,7 @@ export const DesignReviewerNode = memo(({ id, data }: NodeProps<PSDNodeData>) =>
           
           let rulesContext = '';
           if (specificRules.length > 0) {
-              rulesContext += `\n[SPECIFIC PROTOCOLS FOR '${targetName}']:\n${specificRules.join('\n')}\n`;
+              rulesContext += `\n[SPECIFIC PROTOCOLS FOR '${targetName}']:\nThe following rules are extracted from the immutable // ${targetName} CONTAINER block. They are STRICT HARD CONSTRAINTS.\n${specificRules.join('\n')}\n`;
           }
           if (globalRules.length > 0) {
               rulesContext += `\n[GLOBAL BRAND GUIDELINES]:\n${globalRules.join('\n')}\n`;
@@ -553,7 +552,7 @@ export const DesignReviewerNode = memo(({ id, data }: NodeProps<PSDNodeData>) =>
 
           const prompt = `
             ROLE: Chief Compliance Officer & Protocol Enforcer (CARO).
-            MISSION: Ensure 100% compliance with the Scoped Rules provided. Verify the Input Image against these rules.
+            MISSION: Perform a Surgical Geometric Audit. Enforce 100% compliance with the Scoped Rules provided below.
             
             ${userInstruction ? `MODE: INTERACTIVE REFINEMENT. User Request: "${userInstruction}".\nTASK: Execute the user's request while maintaining strict adherence to Knowledge Protocols.` : `MODE: AUTOMATED COMPLIANCE AUDIT.\nTASK: Scan the layout for Protocol Violations. Enforce strict geometric adherence to the Rules provided.`}
             
@@ -568,22 +567,24 @@ export const DesignReviewerNode = memo(({ id, data }: NodeProps<PSDNodeData>) =>
             1. VISUAL STATE: An image representing the current layout.
             2. METADATA: JSON describing the layer hierarchy and current coordinates.
             
-            EXECUTION PROTOCOL:
-            1. RULE PRIMACY: Scan the JSON and Image. For every layer, check if a specific [PROTOCOL] applies (e.g., "red belly", "vertical center", "20px padding").
-               - If a rule specifies a position, you must override the current geometry to match, even if it feels 'unbalanced' to your generic training.
-            2. VIOLATION DETECTION: If a layer deviates from its rule, calculate the PRECISE geometric delta (x/y offset, scale multiplier) needed to fix it.
-            3. COORDINATE RECONCILIATION: All offsets are relative to the *Original Layer Coordinates* provided in the JSON. 
-               - If refining an existing override, sum the new delta with the old one.
-            4. FALLBACK: If no specific rule applies to an element, apply standard design principles (Optical Centering, Safe Margins) to prevent collisions.
+            HEURISTIC AUDIT PROTOCOL:
+            1. ISOLATION: Only consider rules listed under [SPECIFIC PROTOCOLS] and [GLOBAL BRAND GUIDELINES]. Ignore generic design training if it conflicts.
+            2. LINEAR VERIFICATION: Check every single rule against every visible layer in the provided JSON.
+            3. GEOMETRIC LOCKING: If a rule implies a coordinate (e.g., "centered", "aligned left", "20px padding", "red belly"), calculate the EXACT pixel offset required to achieve it.
+               - Example: If "Center vertically", calculate (TargetH/2 - LayerH/2) and set yOffset to match.
+               - Example: If "20px from bottom", set yOffset such that (LayerY + LayerH) = (TargetH - 20).
+            4. SUB-REGION LOGIC: If a rule mentions a specific sub-area (e.g., "safe zone", "text area"), identify that region in the visual input and align relative to THAT specific bounding box, not just the canvas center.
+            5. CROSS-CONTAMINATION PREVENTION: Ignore any rules that appear to belong to other containers. Focus ONLY on the active scoped block.
             
             CONSTRAINTS:
             - MODIFY ONLY: xOffset, yOffset, individualScale, rotation.
             - FORBIDDEN: Do not add layers. Do not delete layers. Do not change text content.
-            - TRACEABILITY: You MUST populate the 'citedRule' field for every override. Every nudge in the overrides array MUST cite a specific Rule Name or ID from the injected text. If strictly polishing, use "Optical Equilibrium".
+            - TRACEABILITY: You MUST populate the 'citedRule' field for every override. Every nudge in the overrides array MUST cite a specific Rule Name or ID from the injected text.
+            - CHAIN OF THOUGHT: Start your response with a "Compliance Log" detailing the logic for each applied override.
             
             OUTPUT FORMAT (JSON):
             {
-                "CARO_Audit": "Concise log of compliance checks. List passed/failed rules.",
+                "CARO_Audit": "Concise log of compliance checks. List passed/failed rules and the geometric logic used.",
                 "overrides": [ 
                     { 
                         "layerId": "string (from input)", 
@@ -591,7 +592,7 @@ export const DesignReviewerNode = memo(({ id, data }: NodeProps<PSDNodeData>) =>
                         "yOffset": number (pixels), 
                         "individualScale": number (multiplier, default 1.0), 
                         "rotation": number (degrees, default 0), 
-                        "citedRule": "string (The exact rule enforced)" 
+                        "citedRule": "string (The exact rule text enforced)" 
                     } 
                 ]
             }
@@ -603,7 +604,6 @@ export const DesignReviewerNode = memo(({ id, data }: NodeProps<PSDNodeData>) =>
               { inlineData: { mimeType: 'image/jpeg', data: visualBase64.split(',')[1] } }
           ];
           
-          // Inject Visual Anchors if available in knowledge
           if (knowledgeContext && knowledgeContext.visualAnchors && knowledgeContext.visualAnchors.length > 0) {
               parts.push({ text: "VISUAL STYLE REFERENCES:" });
               knowledgeContext.visualAnchors.slice(0, 3).forEach((anchor) => {
@@ -638,7 +638,9 @@ export const DesignReviewerNode = memo(({ id, data }: NodeProps<PSDNodeData>) =>
                           }
                       },
                       required: ['CARO_Audit', 'overrides']
-                  }
+                  },
+                  // Enable Thinking for Gemini 3 Flash to ensure high-precision geometric reasoning
+                  thinkingConfig: { thinkingBudget: 4096 }
               }
           });
 
