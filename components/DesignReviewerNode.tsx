@@ -3,9 +3,10 @@ import { Handle, Position, NodeProps, NodeResizer, useEdges, useUpdateNodeIntern
 import { PSDNodeData, TransformedPayload, ReviewerInstanceState, ReviewerStrategy, TransformedLayer, LayerOverride, ChatMessage, KnowledgeContext } from '../types';
 import { useProceduralStore } from '../store/ProceduralContext';
 import { findLayerByPath } from '../services/psdService';
+import { useKnowledgeScoper } from '../hooks/useKnowledgeScoper';
 import { GoogleGenAI, Type } from "@google/genai";
 import { Psd } from 'ag-psd';
-import { Activity, ShieldCheck, Maximize, RotateCw, ArrowRight, ScanEye, BookOpen, Send, MessageSquare } from 'lucide-react';
+import { Activity, ShieldCheck, Maximize, RotateCw, ArrowRight, ScanEye, BookOpen, Send, MessageSquare, BrainCircuit } from 'lucide-react';
 
 const DEFAULT_REVIEWER_STATE: ReviewerInstanceState = {
     chatHistory: [],
@@ -182,7 +183,8 @@ const ReviewerInstanceRow: React.FC<{
     onRefine: (index: number, prompt: string) => void;
     onUpdateState: (index: number, updates: Partial<ReviewerInstanceState>) => void;
     isProcessing: boolean;
-}> = ({ index, nodeId, state, incomingPayload, onReview, onRefine, onUpdateState, isProcessing }) => {
+    hasScopedRules: boolean;
+}> = ({ index, nodeId, state, incomingPayload, onReview, onRefine, onUpdateState, isProcessing, hasScopedRules }) => {
     const isReady = !!incomingPayload;
     const chatContainerRef = useRef<HTMLDivElement>(null);
     const { registerReviewerPayload } = useProceduralStore();
@@ -296,13 +298,25 @@ const ReviewerInstanceRow: React.FC<{
                         {incomingPayload?.targetContainer || `Auditor ${index + 1}`}
                     </span>
                 </div>
-                {/* Active Directives Badge */}
-                {incomingPayload?.directives && incomingPayload.directives.length > 0 && (
-                    <div className="flex items-center space-x-1 pr-2">
-                        <BookOpen className="w-3 h-3 text-teal-400" />
-                        <span className="text-[8px] text-teal-300 font-mono">{incomingPayload.directives.length} Rules Active</span>
-                    </div>
-                )}
+                
+                {/* Status Badges */}
+                <div className="flex items-center space-x-2 pr-2">
+                    {/* Scoped Rules Active Badge */}
+                    {hasScopedRules && (
+                        <div className="flex items-center space-x-1 bg-emerald-900/30 border border-emerald-500/30 px-1.5 py-0.5 rounded">
+                            <BrainCircuit className="w-2.5 h-2.5 text-emerald-400" />
+                            <span className="text-[8px] text-emerald-300 font-mono font-bold">SCOPED RULES</span>
+                        </div>
+                    )}
+                    
+                    {/* Upstream Directives Badge */}
+                    {incomingPayload?.directives && incomingPayload.directives.length > 0 && (
+                        <div className="flex items-center space-x-1">
+                            <BookOpen className="w-3 h-3 text-teal-400" />
+                            <span className="text-[8px] text-teal-300 font-mono">{incomingPayload.directives.length} Directives</span>
+                        </div>
+                    )}
+                </div>
             </div>
 
             {/* Audit Console */}
@@ -417,6 +431,9 @@ export const DesignReviewerNode = memo(({ id, data }: NodeProps<PSDNodeData>) =>
     return knowledgeRegistry[edge.source];
   }, [edges, id, knowledgeRegistry]);
 
+  // USE SCOPER: Extract rules from knowledge rules text
+  const { scopes } = useKnowledgeScoper(activeKnowledge?.rules);
+
   // ResizeObserver to handle dynamic content height changes (like chat expanding)
   useEffect(() => {
     if (rootRef.current) {
@@ -502,10 +519,23 @@ export const DesignReviewerNode = memo(({ id, data }: NodeProps<PSDNodeData>) =>
           const visualBase64 = await renderCurrentState(effectivePayload, psd);
           if (!visualBase64) throw new Error("Failed to composite visual state.");
 
-          // 3. Prepare AI Request
+          // 3. Prepare AI Request with Knowledge Scoping
           const apiKey = process.env.API_KEY;
           if (!apiKey) throw new Error("API Key missing");
           const ai = new GoogleGenAI({ apiKey });
+
+          // SCOPING LOGIC
+          const targetName = payload.targetContainer?.toUpperCase() || 'UNKNOWN';
+          const specificRules = scopes[targetName] || [];
+          const globalRules = scopes['GLOBAL CONTEXT'] || [];
+          
+          let rulesContext = '';
+          if (specificRules.length > 0) {
+              rulesContext += `\n[SPECIFIC PROTOCOLS FOR '${targetName}']:\n${specificRules.join('\n')}\n`;
+          }
+          if (globalRules.length > 0) {
+              rulesContext += `\n[GLOBAL BRAND GUIDELINES]:\n${globalRules.join('\n')}\n`;
+          }
 
           const simplifiedLayers = payload.layers.map(l => ({
               id: l.id,
@@ -533,13 +563,14 @@ export const DesignReviewerNode = memo(({ id, data }: NodeProps<PSDNodeData>) =>
             - Target Container: ${payload.targetContainer}
             - Scale Factor: ${payload.scaleFactor}
             - ${contextContext}
+            ${rulesContext}
             
             INPUT:
             1. An image of the CURRENT visual state.
             2. The ORIGINAL layer hierarchy JSON (before overrides).
             
             TASK:
-            ${userInstruction ? `Analyze the image and the User Instruction: "${userInstruction}". Calculate the NEW set of overrides required to achieve this goal.` : `Identify aesthetic collisions and geometric drifts. Provide precise 'nudges' to achieve Optical Equilibrium.`}
+            ${userInstruction ? `Analyze the image and the User Instruction: "${userInstruction}". Calculate the NEW set of overrides required to achieve this goal.` : `Identify aesthetic collisions and geometric drifts. Provide precise 'nudges' to achieve Optical Equilibrium. Enforce the provided Knowledge Protocols strictly.`}
             
             IMPORTANT:
             - Your output 'overrides' must be the FULL LIST required to transform the ORIGINAL LAYOUT to the FINAL DESIRED STATE.
@@ -549,7 +580,7 @@ export const DesignReviewerNode = memo(({ id, data }: NodeProps<PSDNodeData>) =>
             RULES:
             - DO NOT change content or delete layers.
             - ONLY apply offsets and micro-scaling.
-            - ATTRIBUTION: Provide a 'citedRule' string explaining the aesthetic reason (e.g., "User Request: Adjusted header position").
+            - ATTRIBUTION: Provide a 'citedRule' string explaining the aesthetic reason (e.g., "User Request: Adjusted header position" or "Enforced protocol: 20px padding").
             
             OUTPUT JSON:
             {
@@ -563,6 +594,14 @@ export const DesignReviewerNode = memo(({ id, data }: NodeProps<PSDNodeData>) =>
               { text: `ORIGINAL LAYER HIERARCHY:\n${JSON.stringify(simplifiedLayers.slice(0, 50))}` },
               { inlineData: { mimeType: 'image/jpeg', data: visualBase64.split(',')[1] } }
           ];
+          
+          // Inject Visual Anchors if available in knowledge
+          if (knowledgeContext && knowledgeContext.visualAnchors && knowledgeContext.visualAnchors.length > 0) {
+              parts.push({ text: "VISUAL STYLE REFERENCES:" });
+              knowledgeContext.visualAnchors.slice(0, 3).forEach((anchor) => {
+                  parts.push({ inlineData: { mimeType: anchor.mimeType, data: anchor.data } });
+              });
+          }
 
           // 4. Call Gemini
           const response = await ai.models.generateContent({
@@ -687,19 +726,27 @@ export const DesignReviewerNode = memo(({ id, data }: NodeProps<PSDNodeData>) =>
       </div>
 
       <div className="flex flex-col bg-slate-950/50 min-h-[100px]">
-          {Array.from({ length: instanceCount }).map((_, i) => (
-              <ReviewerInstanceRow 
-                key={i} 
-                index={i} 
-                nodeId={id}
-                state={reviewerInstances[i] || { chatHistory: [], reviewerStrategy: null }}
-                incomingPayload={getIncomingPayload(i)}
-                onReview={handleReview}
-                onRefine={handleRefine}
-                onUpdateState={updateInstanceState}
-                isProcessing={!!processingState[i]}
-              />
-          ))}
+          {Array.from({ length: instanceCount }).map((_, i) => {
+              const payload = getIncomingPayload(i);
+              const targetName = payload?.targetContainer?.toUpperCase() || '';
+              // Determine if scoped rules exist for this specific instance target
+              const hasScopedRules = (scopes[targetName]?.length || 0) > 0;
+
+              return (
+                  <ReviewerInstanceRow 
+                    key={i} 
+                    index={i} 
+                    nodeId={id}
+                    state={reviewerInstances[i] || { chatHistory: [], reviewerStrategy: null }}
+                    incomingPayload={payload}
+                    onReview={handleReview}
+                    onRefine={handleRefine}
+                    onUpdateState={updateInstanceState}
+                    isProcessing={!!processingState[i]}
+                    hasScopedRules={hasScopedRules}
+                  />
+              );
+          })}
       </div>
 
       {/* Footer */}
