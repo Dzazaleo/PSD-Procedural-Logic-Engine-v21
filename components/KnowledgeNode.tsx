@@ -253,14 +253,26 @@ export const KnowledgeNode = memo(({ id, data }: NodeProps<PSDNodeData>) => {
                         ${rawText.substring(0, 25000)} // Truncate to be safe
                         
                         TASK:
-                        Summarize the above brand manual content into a concise, numbered list of 10-15 actionable 'Procedural Design Rules'. 
+                        Summarize the above brand manual content into a concise list of actionable 'Procedural Design Rules'. 
                         Focus on spatial layout, typography rules, color usage logic, and hierarchy.
-                        e.g., 'Primary titles must have 24px top padding', 'Use a 12-column grid'.
                         
+                        CRITICAL OUTPUT FORMAT:
+                        For every container-specific rule, you MUST wrap the block with start and end tags.
+                        
+                        Example:
+                        // HERO CONTAINER
+                        - Rules for hero section...
+                        // END OF HERO CONTAINER
+                        
+                        // FOOTER CONTAINER
+                        - Rules for footer...
+                        // END OF FOOTER CONTAINER
+                        
+                        For global rules, put them at the top without container tags.
                         Format as plain text.
                     `,
                     config: {
-                        systemInstruction: "You are a Design Systems Lead. Extract strict procedural logic from brand guidelines."
+                        systemInstruction: "You are a Design Systems Lead. Extract strict procedural logic from brand guidelines using the // CONTAINER block syntax."
                     }
                 });
                 finalRules = response.text || "No rules generated.";

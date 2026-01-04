@@ -681,6 +681,9 @@ export const DesignAnalystNode = memo(({ id, data }: NodeProps<PSDNodeData>) => 
         ${effectiveRules}
         [END KNOWLEDGE]
         
+        CONTEXT SOURCE:
+        The rules above were extracted from "// [NAME] CONTAINER" blocks. They are strict hard constraints for this specific layout.
+        
         CRITICAL: You are restricted to the following [CONTAINER PROTOCOL]. Ignore all previous generic design training that contradicts these specific rules.
         
         ` + prompt;
