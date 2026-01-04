@@ -547,45 +547,51 @@ export const DesignReviewerNode = memo(({ id, data }: NodeProps<PSDNodeData>) =>
               type: l.type
           }));
 
-          const instructionMode = userInstruction 
-             ? `MODE: INTERACTIVE REFINEMENT. The user has provided specific instructions.` 
-             : `MODE: INITIAL AUDIT. Perform standard optical reconciliation.`;
-             
           const contextContext = currentOverrides.length > 0
              ? `CURRENT STATE: The provided image reflects the following overrides applied to the original layout: ${JSON.stringify(currentOverrides)}.`
              : `CURRENT STATE: Baseline Procedural Layout.`;
 
           const prompt = `
-            ROLE: CARO (Chief Aesthetic Reconciliation Officer).
-            ${instructionMode}
+            ROLE: Chief Compliance Officer & Protocol Enforcer (CARO).
+            MISSION: Treat the provided [KNOWLEDGE PROTOCOLS] as immutable geometric laws. Verify the Input Image against these rules.
+            
+            ${userInstruction ? `MODE: INTERACTIVE REFINEMENT. User Request: "${userInstruction}".\nTASK: Execute the user's request while maintaining strict adherence to Knowledge Protocols.` : `MODE: AUTOMATED COMPLIANCE AUDIT.\nTASK: Scan the layout for Protocol Violations. Enforce strict geometric adherence to the Rules provided.`}
             
             CONTEXT:
-            - Target Container: ${payload.targetContainer}
+            - Target Container: "${payload.targetContainer}"
             - Scale Factor: ${payload.scaleFactor}
             - ${contextContext}
             ${rulesContext}
             
-            INPUT:
-            1. An image of the CURRENT visual state.
-            2. The ORIGINAL layer hierarchy JSON (before overrides).
+            INPUT DATA:
+            1. VISUAL STATE: An image representing the current layout.
+            2. METADATA: JSON describing the layer hierarchy and current coordinates.
             
-            TASK:
-            ${userInstruction ? `Analyze the image and the User Instruction: "${userInstruction}". Calculate the NEW set of overrides required to achieve this goal.` : `Identify aesthetic collisions and geometric drifts. Provide precise 'nudges' to achieve Optical Equilibrium. Enforce the provided Knowledge Protocols strictly.`}
+            EXECUTION PROTOCOL:
+            1. RULE MAPPING: Scan the JSON and Image. For every layer, check if a specific [PROTOCOL] applies (e.g., "Logo must be centered", "Text must have 20px padding").
+            2. VIOLATION DETECTION: If a layer deviates from its rule, calculate the PRECISE geometric delta (x/y offset, scale multiplier) needed to fix it.
+            3. COORDINATE RECONCILIATION: All offsets are relative to the *Original Layer Coordinates* provided in the JSON. 
+               - If refining an existing override, sum the new delta with the old one.
+            4. FALLBACK: If no specific rule applies to an element, apply standard design principles (Optical Centering, Safe Margins) to prevent collisions.
             
-            IMPORTANT:
-            - Your output 'overrides' must be the FULL LIST required to transform the ORIGINAL LAYOUT to the FINAL DESIRED STATE.
-            - If you are refining an existing offset (e.g. moving further left), you must ADD your new delta to the 'CURRENT STATE' offset value.
-            - Example: If current xOffset is -10, and user says "move left 5px", new xOffset must be -15.
+            CONSTRAINTS:
+            - MODIFY ONLY: xOffset, yOffset, individualScale, rotation.
+            - FORBIDDEN: Do not add layers. Do not delete layers. Do not change text content.
+            - TRACEABILITY: You MUST populate the 'citedRule' field for every override. If fixing a violation, quote the rule. If polishing, use "Optical Equilibrium".
             
-            RULES:
-            - DO NOT change content or delete layers.
-            - ONLY apply offsets and micro-scaling.
-            - ATTRIBUTION: Provide a 'citedRule' string explaining the aesthetic reason (e.g., "User Request: Adjusted header position" or "Enforced protocol: 20px padding").
-            
-            OUTPUT JSON:
+            OUTPUT FORMAT (JSON):
             {
-                "CARO_Audit": "Brief report of actions taken.",
-                "overrides": [ { "layerId": "string", "xOffset": number, "yOffset": number, "individualScale": number, "rotation": number, "citedRule": "string" } ]
+                "CARO_Audit": "Concise log of compliance checks. List passed/failed rules.",
+                "overrides": [ 
+                    { 
+                        "layerId": "string (from input)", 
+                        "xOffset": number (pixels), 
+                        "yOffset": number (pixels), 
+                        "individualScale": number (multiplier, default 1.0), 
+                        "rotation": number (degrees, default 0), 
+                        "citedRule": "string (The exact rule enforced)" 
+                    } 
+                ]
             }
           `;
 
