@@ -553,13 +553,14 @@ export const DesignReviewerNode = memo(({ id, data }: NodeProps<PSDNodeData>) =>
 
           const prompt = `
             ROLE: Chief Compliance Officer & Protocol Enforcer (CARO).
-            MISSION: Treat the provided [KNOWLEDGE PROTOCOLS] as immutable geometric laws. Verify the Input Image against these rules.
+            MISSION: Ensure 100% compliance with the Scoped Rules provided. Verify the Input Image against these rules.
             
             ${userInstruction ? `MODE: INTERACTIVE REFINEMENT. User Request: "${userInstruction}".\nTASK: Execute the user's request while maintaining strict adherence to Knowledge Protocols.` : `MODE: AUTOMATED COMPLIANCE AUDIT.\nTASK: Scan the layout for Protocol Violations. Enforce strict geometric adherence to the Rules provided.`}
             
             CONTEXT:
             - Target Container: "${payload.targetContainer}"
             - Scale Factor: ${payload.scaleFactor}
+            - Directives: ${payload.directives ? payload.directives.join(', ') : 'None'}
             - ${contextContext}
             ${rulesContext}
             
@@ -568,7 +569,8 @@ export const DesignReviewerNode = memo(({ id, data }: NodeProps<PSDNodeData>) =>
             2. METADATA: JSON describing the layer hierarchy and current coordinates.
             
             EXECUTION PROTOCOL:
-            1. RULE MAPPING: Scan the JSON and Image. For every layer, check if a specific [PROTOCOL] applies (e.g., "Logo must be centered", "Text must have 20px padding").
+            1. RULE PRIMACY: Scan the JSON and Image. For every layer, check if a specific [PROTOCOL] applies (e.g., "red belly", "vertical center", "20px padding").
+               - If a rule specifies a position, you must override the current geometry to match, even if it feels 'unbalanced' to your generic training.
             2. VIOLATION DETECTION: If a layer deviates from its rule, calculate the PRECISE geometric delta (x/y offset, scale multiplier) needed to fix it.
             3. COORDINATE RECONCILIATION: All offsets are relative to the *Original Layer Coordinates* provided in the JSON. 
                - If refining an existing override, sum the new delta with the old one.
@@ -577,7 +579,7 @@ export const DesignReviewerNode = memo(({ id, data }: NodeProps<PSDNodeData>) =>
             CONSTRAINTS:
             - MODIFY ONLY: xOffset, yOffset, individualScale, rotation.
             - FORBIDDEN: Do not add layers. Do not delete layers. Do not change text content.
-            - TRACEABILITY: You MUST populate the 'citedRule' field for every override. If fixing a violation, quote the rule. If polishing, use "Optical Equilibrium".
+            - TRACEABILITY: You MUST populate the 'citedRule' field for every override. Every nudge in the overrides array MUST cite a specific Rule Name or ID from the injected text. If strictly polishing, use "Optical Equilibrium".
             
             OUTPUT FORMAT (JSON):
             {

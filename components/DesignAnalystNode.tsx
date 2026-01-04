@@ -3,6 +3,7 @@ import { Handle, Position, NodeProps, useEdges, NodeResizer, useReactFlow, useUp
 import { PSDNodeData, LayoutStrategy, SerializableLayer, ChatMessage, AnalystInstanceState, ContainerContext, TemplateMetadata, ContainerDefinition, MappingContext, KnowledgeContext } from '../types';
 import { useProceduralStore } from '../store/ProceduralContext';
 import { getSemanticThemeObject, findLayerByPath } from '../services/psdService';
+import { useKnowledgeScoper } from '../hooks/useKnowledgeScoper';
 import { GoogleGenAI, Type } from "@google/genai";
 import { Brain, BrainCircuit, Ban, ClipboardList, AlertCircle, RefreshCw, RotateCcw, Play } from 'lucide-react';
 import { Psd } from 'ag-psd';
@@ -169,7 +170,6 @@ const InstanceRow: React.FC<any> = ({
     }, [state.chatHistory.length, isAnalyzing]);
 
     // NEW: Robust Event Isolation
-    // Stops wheel events from propagating to React Flow canvas to prevent zooming
     useEffect(() => {
         const container = chatContainerRef.current;
         if (!container) return;
@@ -178,7 +178,6 @@ const InstanceRow: React.FC<any> = ({
             e.stopPropagation();
         };
 
-        // Use native listener with passive: false to ensure we can intercept effectively if needed
         container.addEventListener('wheel', handleWheel, { passive: false });
 
         return () => {
@@ -369,7 +368,6 @@ const InstanceRow: React.FC<any> = ({
 };
 
 export const DesignAnalystNode = memo(({ id, data }: NodeProps<PSDNodeData>) => {
-  // ... (Hooks and Standard Logic) ...
   const [analyzingInstances, setAnalyzingInstances] = useState<Record<number, boolean>>({});
   const instanceCount = data.instanceCount || 1;
   const analystInstances = data.analystInstances || {};
@@ -388,7 +386,6 @@ export const DesignAnalystNode = memo(({ id, data }: NodeProps<PSDNodeData>) => 
     updateNodeInternals(id);
   }, [id, instanceCount, updateNodeInternals]);
 
-  // ... (Active Container Name Logic, Title Suffix, Knowledge Discovery, Helpers) ...
   const activeContainerNames = useMemo(() => {
     const names: string[] = [];
     for (let i = 0; i < instanceCount; i++) {
@@ -412,6 +409,9 @@ export const DesignAnalystNode = memo(({ id, data }: NodeProps<PSDNodeData>) => 
     return knowledgeRegistry[edge.source];
   }, [edges, id, knowledgeRegistry]);
 
+  // PROGRAMMATIC SCOPING: Parse rules once when knowledge changes
+  const { scopes } = useKnowledgeScoper(activeKnowledge?.rules);
+
   const getSourceData = useCallback((index: number) => {
     const edge = edges.find(e => e.target === id && e.targetHandle === `source-in-${index}`);
     if (!edge || !edge.sourceHandle) return null;
@@ -432,7 +432,6 @@ export const DesignAnalystNode = memo(({ id, data }: NodeProps<PSDNodeData>) => 
     return container ? { bounds: container.bounds, name: container.name } : null;
   }, [edges, id, templateRegistry]);
 
-  // UPDATED: Surgical Vision Logic (Isolation Aware)
   const extractSourcePixels = async (
       layers: SerializableLayer[], 
       bounds: {x: number, y: number, w: number, h: number},
@@ -449,25 +448,20 @@ export const DesignAnalystNode = memo(({ id, data }: NodeProps<PSDNodeData>) => 
       const ctx = canvas.getContext('2d');
       if (!ctx) return null;
 
-      // Clean Room Setup
       ctx.clearRect(0, 0, bounds.w, bounds.h);
 
-      // ISOLATION MODE: If strict isolation is requested via targetLayerId
       if (targetLayerId) {
           const targetLayer = findLayerByPath(psd, targetLayerId);
           if (targetLayer && targetLayer.canvas) {
               const dx = (targetLayer.left || 0) - bounds.x;
               const dy = (targetLayer.top || 0) - bounds.y;
               ctx.drawImage(targetLayer.canvas, dx, dy);
-              // EXPLICIT RETURN: Bypass the recursive loop to ensure no other pixels bleed in.
               return canvas.toDataURL('image/png');
           }
-          // If strict targeting fails, return null to avoid dirty merged output
           console.warn("Target layer isolation failed for:", targetLayerId);
           return null; 
       }
 
-      // COMPOSITION MODE: Standard Recursive Draw (Full Context)
       const drawLayers = (layerNodes: SerializableLayer[]) => {
           for (let i = layerNodes.length - 1; i >= 0; i--) {
               const node = layerNodes[i];
@@ -488,7 +482,6 @@ export const DesignAnalystNode = memo(({ id, data }: NodeProps<PSDNodeData>) => 
       return canvas.toDataURL('image/png');
   };
 
-  // ... (Store Sync, Action Handlers) ...
   useEffect(() => {
     const syntheticContainers: ContainerDefinition[] = [];
     let canvasDims = { width: 0, height: 0 };
@@ -500,7 +493,6 @@ export const DesignAnalystNode = memo(({ id, data }: NodeProps<PSDNodeData>) => 
 
         if (sourceData) {
             const history = instanceState.chatHistory || [];
-            // Basic detection for initial prompt keywords (though simplified now)
             const hasExplicitKeywords = history.some(msg => msg.role === 'user' && /\b(generate|recreate|nano banana)\b/i.test(msg.parts[0].text));
             
             const augmentedContext: MappingContext = {
@@ -576,11 +568,8 @@ export const DesignAnalystNode = memo(({ id, data }: NodeProps<PSDNodeData>) => 
     }));
   }, [id, setNodes]);
   
-  // NEW: Reset Handler with Deep Pipeline Flush
   const handleReset = useCallback((index: number) => {
-      // 1. Revert to Default State (Clears Chat & Strategy)
       updateInstanceState(index, DEFAULT_INSTANCE_STATE);
-      // 2. FORCE PIPELINE FLUSH: Clear downstream registries immediately to remove stale AI artifacts
       flushPipelineInstance(id, `source-out-${index}`);
   }, [updateInstanceState, flushPipelineInstance, id]);
 
@@ -619,8 +608,7 @@ export const DesignAnalystNode = memo(({ id, data }: NodeProps<PSDNodeData>) => 
      }
   };
 
-  // ... (System Instruction & Analysis Logic - same as before) ...
-  const generateSystemInstruction = (sourceData: any, targetData: any, isRefining: boolean, knowledgeContext: KnowledgeContext | null) => {
+  const generateSystemInstruction = (sourceData: any, targetData: any, isRefining: boolean, effectiveRules: string | null) => {
     const sourceW = sourceData.container.bounds.w;
     const sourceH = sourceData.container.bounds.h;
     const targetW = targetData.bounds.w;
@@ -651,7 +639,7 @@ export const DesignAnalystNode = memo(({ id, data }: NodeProps<PSDNodeData>) => 
         - Target: ${targetData.name} (${targetW}x${targetH})
         
         LAYER HIERARCHY (JSON):
-        ${JSON.stringify(layerAnalysisData.slice(0, 40))}
+        ${JSON.stringify(layerAnalysisData.slice(0, 100))}
 
         DIRECTIVE EXTRACTION PROTOCOL:
         Analyze the Knowledge Rules below for mandatory constraints (keywords: MUST, SHALL, REQUIRED).
@@ -662,16 +650,6 @@ export const DesignAnalystNode = memo(({ id, data }: NodeProps<PSDNodeData>) => 
         - If rule implies removing elements: add "REMOVE_NON_COMPLIANT".
         - Add any other critical mandates as UPPERCASE_SNAKE_CASE strings.
         
-        KNOWLEDGE SCOPING PROTOCOL:
-        You are analyzing the specific container: "${targetData.name}".
-        Within the GLOBAL PROJECT KNOWLEDGE (if provided below), you must act as a 'Knowledge Scout.' 
-        Search only for sections, headers, or bullet points that semantically relate to "${targetData.name}" or its direct visual function. 
-        Ignore any rules belonging to other containers (e.g., if analyzing REEL, ignore BONUS or UI rules) to prevent cross-contamination.
-
-        INTUITION FALLBACK PROTOCOL:
-        If the provided Knowledge Scoping pass yields no specific results for the container "${targetData.name}", you must revert to your primary persona as a 'Senior Visual Systems Lead.' 
-        Use your expert design intuition to solve for balance, hierarchy, and optical weight.
-
         GROUNDING PROTOCOL:
         1. Link every visual observation to a Metadata ID [layer-ID] using the deterministic path IDs provided in the JSON hierarchy.
         2. Use the Image for visual auditing and JSON for coordinate mapping.
@@ -697,10 +675,10 @@ export const DesignAnalystNode = memo(({ id, data }: NodeProps<PSDNodeData>) => 
         - Your 'overrides' must accurately map to the 'layerId' strings provided in the hierarchy.
     `;
     
-    if (knowledgeContext && knowledgeContext.rules) {
+    if (effectiveRules) {
         prompt = `
-        [START KNOWLEDGE]
-        ${knowledgeContext.rules}
+        [START KNOWLEDGE (SCOPED)]
+        ${effectiveRules}
         [END KNOWLEDGE]
         
         ` + prompt;
@@ -717,6 +695,15 @@ export const DesignAnalystNode = memo(({ id, data }: NodeProps<PSDNodeData>) => 
       const instanceState = analystInstances[index] || DEFAULT_INSTANCE_STATE;
       const modelConfig = MODELS[instanceState.selectedModel as ModelKey];
       const isMuted = instanceState.isKnowledgeMuted || false;
+      
+      // PROGRAMMATIC SCOPING APPLIED
+      const targetName = targetData.name.toUpperCase();
+      const globalRules = scopes['GLOBAL CONTEXT'] || [];
+      const specificRules = scopes[targetName] || [];
+      const effectiveRules = (!isMuted && activeKnowledge) 
+          ? [...globalRules, ...specificRules].join('\n')
+          : null;
+
       const effectiveKnowledge = (!isMuted && activeKnowledge) ? activeKnowledge : null;
 
       setAnalyzingInstances(prev => ({ ...prev, [index]: true }));
@@ -726,8 +713,8 @@ export const DesignAnalystNode = memo(({ id, data }: NodeProps<PSDNodeData>) => 
         if (!apiKey) throw new Error("API_KEY missing");
 
         const ai = new GoogleGenAI({ apiKey });
-        const systemInstruction = generateSystemInstruction(sourceData, targetData, false, effectiveKnowledge);
-        // Default: Full Context
+        const systemInstruction = generateSystemInstruction(sourceData, targetData, false, effectiveRules);
+        
         const sourcePixelsBase64 = await extractSourcePixels(sourceData.layers as SerializableLayer[], sourceData.container.bounds);
 
         const apiContents = history.map(msg => ({ role: msg.role, parts: [...msg.parts] }));
@@ -759,26 +746,15 @@ export const DesignAnalystNode = memo(({ id, data }: NodeProps<PSDNodeData>) => 
             responseSchema: {
                 type: Type.OBJECT,
                 properties: {
-                    reasoning: { 
-                        type: Type.STRING,
-                        description: `MANDATORY: A professional 'Design Audit' paragraph.`
-                    },
+                    reasoning: { type: Type.STRING },
                     method: { type: Type.STRING, enum: ['GEOMETRIC', 'GENERATIVE', 'HYBRID'] },
                     suggestedScale: { type: Type.NUMBER },
                     anchor: { type: Type.STRING, enum: ['TOP', 'CENTER', 'BOTTOM', 'STRETCH'] },
                     generativePrompt: { type: Type.STRING },
                     clearance: { type: Type.BOOLEAN },
                     knowledgeApplied: { type: Type.BOOLEAN },
-                    // NEW: Directives array for mandatory rule extraction
-                    directives: {
-                        type: Type.ARRAY,
-                        items: { type: Type.STRING },
-                        description: "List of mandatory constants extracted from Knowledge rules (e.g. MANDATORY_GEN_FILL)"
-                    },
-                    replaceLayerId: { 
-                        type: Type.STRING,
-                        description: "If GENERATIVE/HYBRID, the exact layerId to replace with the generated asset. Leave empty if no replacement." 
-                    },
+                    directives: { type: Type.ARRAY, items: { type: Type.STRING } },
+                    replaceLayerId: { type: Type.STRING },
                     overrides: {
                         type: Type.ARRAY,
                         items: {
@@ -819,23 +795,18 @@ export const DesignAnalystNode = memo(({ id, data }: NodeProps<PSDNodeData>) => 
 
         const json = JSON.parse(response.text || '{}');
         
-        // --- POST-PROCESSING: Surgical Vision Grounding ---
-        // If the AI identifies a replacement target, we must isolate that texture to prevent merged hallucinations.
         if ((json.method === 'GENERATIVE' || json.method === 'HYBRID') && json.replaceLayerId) {
              const isolatedTexture = await extractSourcePixels(
                  sourceData.layers as SerializableLayer[], 
                  sourceData.container.bounds,
-                 json.replaceLayerId // Target specific layer
+                 json.replaceLayerId
              );
-             
              if (isolatedTexture) {
                  json.sourceReference = isolatedTexture.split(',')[1];
              } else {
-                 // Fallback to full context if isolation fails (though rare if ID is valid)
                  if (sourcePixelsBase64) json.sourceReference = sourcePixelsBase64.split(',')[1];
              }
         } else if (json.method === 'GENERATIVE' || json.method === 'HYBRID') {
-             // Default behavior: Attach full visual context if no specific target
              if (sourcePixelsBase64) {
                  json.sourceReference = sourcePixelsBase64.split(',')[1];
              }
@@ -855,7 +826,6 @@ export const DesignAnalystNode = memo(({ id, data }: NodeProps<PSDNodeData>) => 
         
         updateInstanceState(index, { chatHistory: finalHistory, layoutStrategy: json });
 
-        // Basic detection for initial prompt keywords (though simplified now)
         const isExplicitIntent = history.some(msg => msg.role === 'user' && /\b(generate|recreate|nano banana)\b/i.test(msg.parts[0].text));
         
         const augmentedContext: MappingContext = {
@@ -943,7 +913,7 @@ export const DesignAnalystNode = memo(({ id, data }: NodeProps<PSDNodeData>) => 
               );
           })}
       </div>
-      <button onClick={addInstance} className="w-full py-2 bg-slate-800 hover:bg-slate-700 border-t border-slate-700 text-slate-400 hover:text-slate-200 transition-colors flex items-center justify-center space-x-1 rounded-b-lg">
+      <button onClick={addInstance} className="w-full py-2 bg-slate-900 hover:bg-slate-700 border-t border-slate-700 text-slate-400 hover:text-slate-200 transition-colors flex items-center justify-center space-x-1 rounded-b-lg">
         <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" /></svg>
         <span className="text-[10px] font-medium uppercase tracking-wider">Add Analysis Instance</span>
       </button>
