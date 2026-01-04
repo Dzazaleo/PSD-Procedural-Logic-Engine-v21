@@ -14,7 +14,7 @@ type ModelKey = 'gemini-3-flash' | 'gemini-3-pro' | 'gemini-3-pro-thinking';
 const DEFAULT_INSTANCE_STATE: AnalystInstanceState = {
     chatHistory: [],
     layoutStrategy: null,
-    selectedModel: 'gemini-3-flash',
+    selectedModel: 'gemini-3-pro',
     isKnowledgeMuted: false
 };
 
