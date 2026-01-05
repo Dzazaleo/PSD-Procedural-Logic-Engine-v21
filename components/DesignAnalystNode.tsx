@@ -641,6 +641,14 @@ export const DesignAnalystNode = memo(({ id, data }: NodeProps<PSDNodeData>) => 
         LAYER HIERARCHY (JSON):
         ${JSON.stringify(layerAnalysisData.slice(0, 100))}
 
+        GENERATIVE PROHIBITION PROTOCOL:
+        Your default and primary method is 'GEOMETRIC'.
+        You are STRICTLY FORBIDDEN from using 'GENERATIVE' or 'HYBRID' methods unless the provided [START KNOWLEDGE] rules explicitly authorize image regeneration or AI synthesis for the specific container: '${targetData.name}'.
+        Authorization is only valid if the rules contain phrases such as 'allow generative fill', 'authorize AI reconstruction', or 'recreate background texture'.
+        If the Knowledge rules are missing, muted, or do not explicitly grant generative permission, you MUST select 'GEOMETRIC' and set 'generativePrompt' to an empty string.
+        You cannot use 'Expert Intuition' to justify the creation of new pixels; only explicit Knowledge directives can unlock generative methods.
+        In your 'reasoning' output, if you select a generative method, you must start the paragraph by citing the specific authorization rule found in the Knowledge Context.
+
         DIRECTIVE EXTRACTION PROTOCOL:
         Analyze the Knowledge Rules below for mandatory constraints (keywords: MUST, SHALL, REQUIRED).
         Map them to specific directive constants in the 'directives' array output:
@@ -755,7 +763,11 @@ export const DesignAnalystNode = memo(({ id, data }: NodeProps<PSDNodeData>) => 
                 type: Type.OBJECT,
                 properties: {
                     reasoning: { type: Type.STRING },
-                    method: { type: Type.STRING, enum: ['GEOMETRIC', 'GENERATIVE', 'HYBRID'] },
+                    method: { 
+                        type: Type.STRING, 
+                        enum: ['GEOMETRIC', 'GENERATIVE', 'HYBRID'],
+                        description: "Knowledge-Locked Property. Defaults to 'GEOMETRIC'. 'GENERATIVE'/'HYBRID' require explicit rule authorization."
+                    },
                     suggestedScale: { type: Type.NUMBER },
                     anchor: { type: Type.STRING, enum: ['TOP', 'CENTER', 'BOTTOM', 'STRETCH'] },
                     generativePrompt: { type: Type.STRING },
